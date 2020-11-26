@@ -24,12 +24,15 @@ import java.util.logging.Level;
 import java.util.logging.Logger;
 
 import javax.json.Json;
+import javax.json.JsonArray;
 import javax.json.JsonArrayBuilder;
-import javax.json.JsonObject;
 import javax.json.JsonObjectBuilder;
 
-public class ReadXML {
+public class WriteUniprotXmlToDb {
 
+    protected static String dbUrl = "jdbc:postgresql://localhost/uniprot_trembl";
+    protected static String tableName = "uniprot_trembl";
+    
     public static void main(String[] args) {
         /*
         DB connection
@@ -42,18 +45,26 @@ public class ReadXML {
         }
         Connection con = null;
         Statement st = null;
-        String url = "jdbc:postgresql://localhost/interaction";
-
+        
         try {
 
             Properties props = new Properties();
             props.setProperty("user", "col");
-            con = DriverManager.getConnection(url, props);
-
+            props.setProperty("password", "");
+            con = DriverManager.getConnection(dbUrl, props);
             st = con.createStatement();
-            String statement = "DROP TABLE IF EXISTS uniprot";
+            String statement = "DROP TABLE IF EXISTS " + tableName;
             st.execute(statement);
-            statement = "CREATE TABLE uniprot (accession varchar(10) NOT NULL, json JSON NOT null);";
+            statement = "CREATE TABLE " + tableName 
+                    + " (accession VARCHAR(10) NOT NULL, "
+                    + "name TEXT, full_name TEXT, gene TEXT, organism TEXT[],"
+                    + "sequence TEXT," 
+                    + "keywords TEXT[], comments TEXT[], locations TEXT[], features JSON, go CHAR(9)[] );";
+            st.execute(statement);
+//            uniprot_trembl_pk PRIMARY KEY (accession) ;
+            statement = "ALTER TABLE " + tableName 
+                    + " ADD CONSTRAINT "
+                    + tableName+"_pk PRIMARY KEY (accession);";
             st.execute(statement);
         } catch (SQLException ex) {
             Logger lgr = Logger.getLogger("yo");//Version.class.getName());
@@ -74,14 +85,18 @@ public class ReadXML {
             }
         }
          
- /*
+        /*
         SAX parser
          */
+        //TODO - theres something not right about the way this prog exits
         SAXParserFactory spf = SAXParserFactory.newInstance();
         UniprotHandler handler = new UniprotHandler();
         try {
-            SAXParser sp = spf.newSAXParser();
-            sp.parse("/home/col/data/uniprot/uniprot_sprot.xml/data", handler);
+//            SAXParser sp = spf.newSAXParser();
+            System.err.println("Uniprot.");
+            spf.newSAXParser().parse("/home/col/Downloads/uniprot_sprot.xml/data", handler);
+            System.err.println("trembl.");
+            spf.newSAXParser().parse("/database/uniprot_trembl.xml", handler);
         } catch (SAXException se) {
             se.printStackTrace();
         } catch (ParserConfigurationException pce) {
@@ -117,23 +132,30 @@ class UniprotHandler extends DefaultHandler {
     private static final String TAG_END = "END";
 
     private static final String TAG_SEQUENCE = "SEQUENCE";
-    //dbReferences
+    
+    private static final String TAG_DBREF = "DBREFERENCE";
+    
     //references
 
     private final Stack<String> tagsStack = new Stack<String>();
     private final StringBuilder tempVal = new StringBuilder();
 
-    private JsonObjectBuilder jsonBuilder;
+//    private JsonObjectBuilder jsonBuilder;
     private JsonObjectBuilder jsonFeatureBuilder;
+    private JsonArrayBuilder features;
     private Attributes currentElementAttributes;
     private boolean primaryAccessionSet;
     private String primaryAccession;
     private List<String> secondaryAccessions;
+    private String sequence;
     private String[] organism; // array cells will hold common / scientific / synomyn
     private List<String> keywords;
     private List<String> comments;
     private List<String> locations;
-    private JsonArrayBuilder features;
+    private String name;
+    private String fullName;
+    private String gene;
+    private List<String> go;
 
     private static final Map<String, String> featureTypeToSubsection = new HashMap<String, String>();;
 
@@ -171,7 +193,6 @@ class UniprotHandler extends DefaultHandler {
         pushTag(qName);
         tempVal.setLength(0);
         if (TAG_ENTRY.equalsIgnoreCase(qName)) {
-            jsonBuilder = Json.createObjectBuilder();
             currentElementAttributes = attributes;
             primaryAccessionSet = false;
             secondaryAccessions = new ArrayList<String>();
@@ -179,7 +200,14 @@ class UniprotHandler extends DefaultHandler {
             keywords = new ArrayList<String>();
             comments = new ArrayList<String>();
             locations = new ArrayList<String>();
-            features = Json.createArrayBuilder();
+            features = Json.createArrayBuilder();    
+            name = "";
+            fullName = "";
+            gene = "";
+            sequence = "";
+            go = new ArrayList<String>();
+        } else if (TAG_DBREF.equalsIgnoreCase(qName) && attributes.getValue("type").equalsIgnoreCase("GO")){
+                go.add(attributes.getValue("id").replace(":", ""));
         } else if (TAG_FEATURE.equalsIgnoreCase(qName)) {
             jsonFeatureBuilder = Json.createObjectBuilder();
             String type = attributes.getValue("type");
@@ -203,7 +231,7 @@ class UniprotHandler extends DefaultHandler {
         String tag = peekTag();
         popTag();
         String parentTag = peekTag();
-        String value = tempVal.toString().trim();
+        String value = tempVal.toString().trim().replace("'", "''").replace("\"", "\\\"");
         try {
             if (!qName.equals(tag)) {
                 throw new InternalError();
@@ -211,7 +239,7 @@ class UniprotHandler extends DefaultHandler {
 
             if (TAG_ACC.equalsIgnoreCase(tag)) {
                 if (!primaryAccessionSet) {
-                    jsonBuilder.add("accession", value);
+                    //jsonBuilder.add("accession", value);
                     primaryAccessionSet = true;
                     primaryAccession = value;
                 } else {
@@ -219,9 +247,11 @@ class UniprotHandler extends DefaultHandler {
                 }
             } else if (TAG_NAME.equalsIgnoreCase(tag)) {
                 if (TAG_ENTRY.equalsIgnoreCase(parentTag)) {
-                    jsonBuilder.add("name", value);
+                    //jsonBuilder.add("name", value);
+                    name = value;
                 } else if (TAG_GENE.equalsIgnoreCase(parentTag)) {
-                    jsonBuilder.add("gene", value);
+                    //jsonBuilder.add("gene", value);
+                    gene = value;
                 } else if (TAG_ORGANISM.equalsIgnoreCase(parentTag)) {
                     String type = currentElementAttributes.getValue("type");
                     if (type.equalsIgnoreCase("common")) {
@@ -234,7 +264,8 @@ class UniprotHandler extends DefaultHandler {
                 }
             } else if (TAG_FULLNAME.equalsIgnoreCase(tag)
                     && TAG_RECOMMENDEDNAME.equalsIgnoreCase(parentTag)) {
-                jsonBuilder.add("fullName", value);
+                // jsonBuilder.add("fullName", value);
+                fullName = value;
             } else if (TAG_KEYWORD.equalsIgnoreCase(tag)) {
                 keywords.add(value);
             } else if (TAG_TEXT.equalsIgnoreCase(tag)) {
@@ -246,7 +277,8 @@ class UniprotHandler extends DefaultHandler {
                     locations.add(value);
                 }
             } else if (TAG_SEQUENCE.equalsIgnoreCase(tag)) {
-                jsonBuilder.add("sequence", value);
+                // jsonBuilder.add("sequence", value);
+                sequence = value.replace(" ","");
             } else if (TAG_FEATURE.equalsIgnoreCase(tag)) {
                 features.add(jsonFeatureBuilder);
             } else if (TAG_POSITION.equalsIgnoreCase(tag)
@@ -267,35 +299,32 @@ class UniprotHandler extends DefaultHandler {
                 }
             } else if (TAG_ENTRY.equalsIgnoreCase(tag)) {
                 //end
-                jsonBuilder.add("organism", String.join(" / ", Arrays.asList(organism)));
-                jsonBuilder.add("keywords", String.join(", ", keywords));
-                jsonBuilder.add("comments", String.join(", ", comments));
-                jsonBuilder.add("locations", String.join(", ", locations));
-                jsonBuilder.add("secondaryAccessions", String.join(", ", secondaryAccessions));
-                jsonBuilder.add("features", features);
-                JsonObject json = jsonBuilder.build();
+               
+                JsonArray featureJsonArray = features.build();
 
-                String jsonString = json.toString();
-                jsonString = jsonString.replace("'", "''");
-
-                      
-                String insert = "INSERT INTO uniprot VALUES ('" + primaryAccession
-                        + "','" + jsonString + "')";
-                                
-                statement.addBatch(insert);
-
+                String insert = "INSERT INTO " + WriteUniprotXmlToDb.tableName + " VALUES ('" ;//+ primaryAccession;
+                String endOfInsert = "','" + name
+                        + "','" + fullName
+                        + "','" + gene
+                        + "','" + "{\"" + String.join("\",\"", Arrays.asList(organism)) + "\"}"
+                        + "','" + sequence
+                        + "','" + "{\"" + String.join("\",\"", keywords) + "\"}"
+                        + "','" + "{\"" + String.join("\",\"", comments) + "\"}"
+                        + "','" + "{\"" + String.join("\",\"", locations) + "\"}"
+                        + "','" + featureJsonArray.toString().replace("'", "''")
+                       + "','" + "{\"" + String.join("\",\"", go) + "\"}"
+                        + "')  ON CONFLICT DO NOTHING;;";
+                               
+//                System.out.println("NEW BATCH!");
+                statement.addBatch(insert + primaryAccession + endOfInsert);
+                //System.out.println(primaryAccession);
                 for (String secondaryAccession : secondaryAccessions) {
-                    insert = "INSERT INTO uniprot VALUES ('" + secondaryAccession
-                            + "','" + jsonString + "')";
-                    statement.addBatch(insert);
+                    statement.addBatch(insert + secondaryAccession + endOfInsert);
+//                    System.out.println(insert + secondaryAccession + endOfInsert);
                 }
 
                 statement.executeBatch();
                 statement.clearBatch();
-                 
-//                System.out.println(primaryAccession + ">\t" + String.join(", ", locations));
-//            System.out.println(json.toString());
-                //System.out.println(secondaryAccessions.toString());
             }
         } catch (Exception e) {
             System.out.println(primaryAccession + "\t" + tag + "\t>" + value + "<");
@@ -306,15 +335,13 @@ class UniprotHandler extends DefaultHandler {
     }
 
     @Override
-    public void startDocument() {
-        String url = "jdbc:postgresql://localhost/interaction";
-        
+    public void startDocument() {        
         try {
-
             Properties props = new Properties();
             props.setProperty("user", "col");
-            connection = DriverManager.getConnection(url, props);
-            connection.setAutoCommit(false);
+            props.setProperty("password", "");
+            connection = DriverManager.getConnection(WriteUniprotXmlToDb.dbUrl, props);
+            //connection.setAutoCommit(false);
             statement = connection.createStatement();
                 
         } catch (SQLException ex) {
@@ -329,7 +356,7 @@ class UniprotHandler extends DefaultHandler {
     @Override
     public void endDocument() {
         try {
-            connection.commit();
+            //connection.commit();
             if (statement != null) {
                 statement.close();
             }
@@ -341,7 +368,8 @@ class UniprotHandler extends DefaultHandler {
             Logger lgr = Logger.getLogger("yo");
             lgr.log(Level.WARNING, ex.getMessage(), ex);
         }
-        System.out.println("done here");
+        //System.exit(0);
+        System.out.println("document end");
     }
 
     private void pushTag(String tag) {

@@ -1,4 +1,4 @@
-package psidev.psi.mi.jami.examples.interactionviewer;
+//package psidev.psi.mi.jami.examples.interactionviewer;
 
 import psidev.psi.mi.jami.commons.MIDataSourceOptionFactory;
 import psidev.psi.mi.jami.commons.PsiJami;
@@ -34,7 +34,7 @@ import org.apache.commons.io.FilenameUtils;
  * @version $Id$
  * @since <pre>27/06/14</pre>
  */
-public class ReadWriteJsonWithJami {
+public class ReadWriteJsonWithJami3 {
 
     public static void main(String[] args) throws Exception {
         try {
@@ -49,7 +49,7 @@ public class ReadWriteJsonWithJami {
         String user = "";
         String password = "";
 
-        String path = "/pmid";
+        String path = "/home/col/Downloads/pmidMIF30";
         File folder = new File(path);
         File[] listOfFiles = folder.listFiles();
         Arrays.sort(listOfFiles);
